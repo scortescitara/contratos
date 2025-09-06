@@ -1,0 +1,61 @@
+import streamlit as st
+import pandas as pd
+from docx import Document
+from pathlib import Path
+import re
+import tempfile
+
+st.set_page_config(page_title="Generador de Contratos CITARA", layout="centered")
+st.title("📄 Generador de Contratos CITARA")
+
+# Funciones auxiliares
+def safe_filename(s):
+    return re.sub(r'[\\/:*?"<>|]+', '_', str(s))
+
+def replace_tokens(paragraph, datos):
+    for run in paragraph.runs:
+        for k, v in datos.items():
+            token = f"[{k}]"
+            if token in run.text:
+                run.text = run.text.replace(token, v)
+
+# Subir archivo Excel
+uploaded_file = st.file_uploader("Sube tu Excel con datos de contratos", type=["xlsx"])
+template_file = st.file_uploader("Sube la plantilla de contrato (.docx)", type=["docx"])
+
+if uploaded_file and template_file:
+    df = pd.read_excel(uploaded_file)
+    st.success("✅ Archivos cargados correctamente")
+
+    st.dataframe(df.head())
+
+    if st.button("Generar contratos"):
+        with st.spinner("Generando contratos..."):
+            output_files = []
+            out_dir = Path(tempfile.mkdtemp())
+
+            for _, row in df.iterrows():
+                datos = {col: str(row[col]) for col in df.columns if pd.notna(row[col])}
+                doc = Document(template_file)
+
+                for p in doc.paragraphs:
+                    replace_tokens(p, datos)
+                for table in doc.tables:
+                    for row_ in table.rows:
+                        for cell in row_.cells:
+                            for p in cell.paragraphs:
+                                replace_tokens(p, datos)
+
+                filename = f"CONTRATO_{safe_filename(datos.get('PAC', ''))}_{safe_filename(datos.get('CENTRO', ''))}.docx"
+                filepath = out_dir / filename
+                doc.save(filepath)
+                output_files.append(filepath)
+
+            st.success(f"✅ {len(output_files)} contrato(s) generados.")
+
+            for file in output_files:
+                st.download_button(
+                    label=f"Descargar {file.name}",
+                    data=file.read_bytes(),
+                    file_name=file.name
+                )
